@@ -1,6 +1,6 @@
 # **darknet**
-make a after_bach_model.weights
-> src/nework.c
+**make a after_bach_model.weights**
+> **src/nework.c**
 
 0. Download test video : test50.mp4
 > https://drive.google.com/file/d/1cVbsXqaTU8BIR3owLB2kgl4cGyvYwSt4/view?usp=sharing
