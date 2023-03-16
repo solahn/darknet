@@ -1318,18 +1318,30 @@ void fuse_conv_batchnorm(network net)
 			// Calculate half of the biases and weights
 			int half_biases = l->n / 2;
 			int half_weights = l->nweights / 2;// Write the first half of biases and weights
+			
 			fwrite(l->biases, sizeof(float), half_biases, fp);
 			fwrite(l->weights, sizeof(float), half_weights, fp);// Write the remaining half of biases and weights
+			sum_batch += half_biases + half_weights;
+			
+		        printf("%d - split (1) batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+		        printf("%d - split (1) layer param size: %d (%d)\n",j,(half_biases+half_weights)*4,sum_batch*4);
+		        
 			fwrite(l->biases + half_biases, sizeof(float), l->n - half_biases, fp);
 			fwrite(l->weights + half_weights, sizeof(float), l->nweights - half_weights, fp);
+			sum_batch += half_biases + half_weights;
+			
+		        printf("%d - split (2) batch_layer l.biases %lf l.weights %lf \n",j,l->biases[half_biases],l->weights[half_weights]);
+		        printf("%d - split (2) layer param size: %d (%d)\n",j,((l->n-half_biases)+(l->nweights-half_weights))*4,sum_batch*4);
 		}
                 else{
 		        fwrite(l->biases,sizeof(float),l->n,fp);
 		        fwrite(l->weights,sizeof(float),l->nweights,fp);
+		        sum_batch += l->n + l->nweights;
+		        
+		        printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+		        printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
                 }
-//                printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
-                sum_batch += l->n + l->nweights;
-//                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+
 /** Make after_batch model files**/
 
                 free_convolutional_batchnorm(l);
@@ -1344,18 +1356,33 @@ void fuse_conv_batchnorm(network net)
 /** Make after_batch model files**/
             else if (!l->batch_normalize){
                 if (j == 191 || j == 195 || j== 199){
-                    fwrite(l->biases,sizeof(float),l->n/2,fp);
-                    fwrite(l->weights,sizeof(float),l->nweights/2,fp);
-                    fwrite(l->biases,sizeof(float),l->n/2,fp);
-                    fwrite(l->weights,sizeof(float),l->nweights/2,fp);
+			// Calculate half of the biases and weights
+			int half_biases = l->n / 2;
+			int half_weights = l->nweights / 2;// Write the first half of biases and weights
+			
+			fwrite(l->biases, sizeof(float), half_biases, fp);
+			fwrite(l->weights, sizeof(float), half_weights, fp);// Write the remaining half of biases and weights
+			sum_batch += half_biases + half_weights;
+			
+		        printf("%d - split (1) !batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+		        printf("%d - split (1) layer param size: %d (%d)\n",j,(half_biases+half_weights)*4,sum_batch*4);
+		        
+			fwrite(l->biases + half_biases, sizeof(float), l->n - half_biases, fp);
+			fwrite(l->weights + half_weights, sizeof(float), l->nweights - half_weights, fp);
+			sum_batch += half_biases + half_weights;
+			
+		        printf("%d - split (2) !batch_layer l.biases %lf l.weights %lf \n",j,l->biases[half_biases],l->weights[half_weights]);
+		        printf("%d - split (2) layer param size: %d (%d)\n",j,((l->n-half_biases)+(l->nweights-half_weights))*4,sum_batch*4);
+		}
+                else{
+		        fwrite(l->biases,sizeof(float),l->n,fp);
+		        fwrite(l->weights,sizeof(float),l->nweights,fp);
+		        sum_batch += l->n + l->nweights;
+		        
+		        printf("%d !batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+		        printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
                 }
-                else {
-                    fwrite(l->biases,sizeof(float),l->n,fp);
-                    fwrite(l->weights,sizeof(float),l->nweights,fp);
-                }
-//                printf("%d !batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
-                sum_batch += l->n + l->nweights;
-//                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+
             }
 /** Make after_batch model files**/
 
