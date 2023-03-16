@@ -1343,8 +1343,16 @@ void fuse_conv_batchnorm(network net)
 
 /** Make after_batch model files**/
             else if (!l->batch_normalize){
-                fwrite(l->biases,sizeof(float),l->n,fp);
-                fwrite(l->weights,sizeof(float),l->nweights,fp);
+                if (j == 191 || j == 195 || j== 199){
+                    fwrite(l->biases,sizeof(float),l->n/2,fp);
+                    fwrite(l->weights,sizeof(float),l->nweights/2,fp);
+                    fwrite(l->biases,sizeof(float),l->n/2,fp);
+                    fwrite(l->weights,sizeof(float),l->nweights/2,fp);
+                }
+                else {
+                    fwrite(l->biases,sizeof(float),l->n,fp);
+                    fwrite(l->weights,sizeof(float),l->nweights,fp);
+                }
 //                printf("%d !batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
                 sum_batch += l->n + l->nweights;
 //                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
