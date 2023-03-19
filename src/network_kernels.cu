@@ -83,7 +83,9 @@ void forward_network_gpu(network net, network_state state)
         if(l.delta_gpu && state.train){
             fill_ongpu(l.outputs * l.batch, 0, l.delta_gpu, 1);
         }
-
+        if(l.type == CONVOLUTIONAL){
+            printf("CONV %d \n", i);
+        }
         if (net.benchmark_layers) {
             start_time = get_time_point();
         }
