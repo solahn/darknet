@@ -1289,14 +1289,20 @@ void fuse_conv_batchnorm(network net)
     for (j = 0; j < net.n; ++j) {
         layer *l = &net.layers[j];
 
-        if (l->type == CONVOLUTIONAL) {
+        if (l->type == CONVOLUTIONAL  || l->type == CONNECTED ) {
             //printf(" Merges Convolutional-%d and batch_norm \n", j);
-
+            if (l->type == CONVOLUTIONAL){
+                printf("CONV %d ", j);
+            }
+            else if ( l->type == CONNECTED ){
+                printf("FC %d ", j);
+            }
             if (l->share_layer != NULL) {
                 l->batch_normalize = 0;
             }
 
             if (l->batch_normalize) {
+                printf("--> BN\n");
                 int f;
                 for (f = 0; f < l->n; ++f)
                 {
@@ -1316,9 +1322,11 @@ void fuse_conv_batchnorm(network net)
 /** Make after_batch model files**/
                 fwrite(l->biases,sizeof(float),l->n,fp);
                 fwrite(l->weights,sizeof(float),l->nweights,fp);
-//                printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+                printf("l->n : %d, l->nweights : %d \n",l->n, l->nweights);
+                printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
                 sum_batch += l->n + l->nweights;
-//                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+                printf("layer param size: %d (%d)\n",(l->n+l->nweights)*4,sum_batch*4);
+                printf("-------------------------------------------------------------\n");
 /** Make after_batch model files**/
 
                 free_convolutional_batchnorm(l);
@@ -1332,11 +1340,14 @@ void fuse_conv_batchnorm(network net)
 
 /** Make after_batch model files**/
             else if (!l->batch_normalize){
+                printf("--> !BN\n");
                 fwrite(l->biases,sizeof(float),l->n,fp);
                 fwrite(l->weights,sizeof(float),l->nweights,fp);
-//                printf("%d !batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+                printf("l->n : %d, l->nweights : %d \n",l->n, l->nweights);
+                printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
                 sum_batch += l->n + l->nweights;
-//                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+                printf("-------------------------------------------------------------\n");
             }
 /** Make after_batch model files**/
 
