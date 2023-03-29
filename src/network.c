@@ -1319,7 +1319,7 @@ void create_groups(int split_data[][3], int n, Group *groups, int *group_count, 
             int split_memory = split_data[i][1];
             int split_num = split_data[i][2];
             int layer_count =  0;
-            
+
             if ( split_data[i][1] != 0 ) layer_count = remaining_memory / split_memory;
             else layer_count = remaining_memory / 1;
 
@@ -1345,6 +1345,19 @@ void create_groups(int split_data[][3], int n, Group *groups, int *group_count, 
     *group_count = current_group_id;
 }
 
+void check_each_num_of_group_member (Group *groups, int group_count) {
+    
+    for (int j = 0; j < group_count; ++j) {
+        int num_of_group_member = 0;
+        for (int i = 0; i < number_L && groups[j].split_layer_ids[i] != 0; ++i) {
+            // printf("groups[j].split_layer_ids[i]: %d\n", groups[j].split_layer_ids[i]);
+            num_of_group_member ++;
+        }
+        groups[j].group_members = num_of_group_member;
+        // printf("num_of_group_member: %d\n", groups[j].group_members);
+    }
+}
+
 void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const char *filename) {
     FILE *file = fopen(filename, "w");
     if (file == NULL) {
@@ -1357,6 +1370,7 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
     fprintf(file, "\n");
     fprintf(file, "typedef struct {\n");
     fprintf(file, "    int group_id;\n");
+    fprintf(file, "    int group_members;\n");
     fprintf(file, "    int group_memory;\n");
     fprintf(file, "    int split_layer_ids[number_L];\n");
     fprintf(file, "    int split_layer_nums[number_L];\n");
@@ -1365,7 +1379,7 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
     fprintf(file, "Group groups[number_G] = {\n");
 
     for (int i = 0; i < group_count; i++) {
-        fprintf(file, "    {%d, %d,\n", groups[i].group_id, groups[i].group_memory);
+        fprintf(file, "    {%d, %d, %d,\n", groups[i].group_id, groups[i].group_members, groups[i].group_memory);
         fprintf(file, "    {");
         for (int j = 0; j < number_L; j++) {
             if (j != 0) {
@@ -1392,20 +1406,16 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
 
 void make_after_split_model(network net, int maximum_mem, Group *groups, int group_count, const char *filename)
 {
-    int j;
-
-/** Make after_batch model files**/
     int sum_batch=0;
-    int sum_of_batch[500] = {0};
     FILE *fp = fopen(filename,"ab");
     int split_size = 4;
     split_status[191] = split_size;
     split_status[195] = split_size;
     split_status[199] = split_size;
-/** Make after_batch model files**/
+    printf("group count: %d\n", group_count);
+    for (int j = 0; j < group_count; ++j) {
 
-
-    for (j = 0; j < net.n; ++j) {
+        // printf("- layers: %d \n", sizeof(groups[j].split_layer_ids)/sizeof(groups[j].split_layer_ids[0])); // groups[i].group_members
 
         layer *l = &net.layers[j];
         split_num = split_status[j];
@@ -1421,7 +1431,6 @@ void make_after_split_model(network net, int maximum_mem, Group *groups, int gro
             if (l->batch_normalize) {
                 // printf("--> BN\n");
 
-/** Make after_batch model files**/
                 if (split_num){
                     // Calculate half of the biases and weights
                     int half_biases = l->n / split_num;
@@ -1447,10 +1456,8 @@ void make_after_split_model(network net, int maximum_mem, Group *groups, int gro
                     // printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
                     // printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
                 }
-/** Make after_batch model files**/
             }
 
-/** Make after_batch model files**/
             else if (!l->batch_normalize){
                 if (split_num){
                     // Calculate half of the biases and weights
@@ -1477,15 +1484,10 @@ void make_after_split_model(network net, int maximum_mem, Group *groups, int gro
 		        // printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
                 }
             }
-/** Make after_batch model files**/
-
         }
-
     }
 
-/** Make after_batch model files**/
     fclose(fp);
-/** Make after_batch model files**/
 }
 
 void fuse_conv_batchnorm(network net)
@@ -1630,23 +1632,20 @@ void fuse_conv_batchnorm(network net)
     }
 
     size_t split_row_count = sizeof(split_data) / sizeof(split_data[0]);
-
     save_2d_array_to_file(split_data, split_row_count, "./saved_split_info.c");
 
     // Printing the merge_data
     int n = sizeof(split_data) / sizeof(split_data[0]);
-
     Group groups[number_G] = {0,};
-
     int group_count = 0;
-
     create_groups(split_data, n, groups, &group_count, MAX_memory);
+    check_each_num_of_group_member(groups, group_count);
 
     // Save groups to file
     save_groups_to_file(MAX_memory, groups, group_count, "saved_groups.c");
-    
+
     for (int i = 0; i < group_count; i++) {
-        printf("Group %d, memory %d:\n", groups[i].group_id, groups[i].group_memory);
+        printf("Group %d, members: %d, memory %d:\n", groups[i].group_id, groups[i].group_members, groups[i].group_memory);
         for (int j = 0; j < number_G && groups[i].split_layer_ids[j] != 0; j++) {
             printf("Layer ID: %d, count: %d\n",
                    groups[i].split_layer_ids[j],
