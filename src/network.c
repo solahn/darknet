@@ -39,6 +39,8 @@
 #include "upsample_layer.h"
 #include "parser.h"
 
+#include "j_header.h"
+
 load_args get_base_args(network *net)
 {
     load_args args = { 0 };
@@ -1277,32 +1279,149 @@ static float lrelu(float src) {
     return eps;
 }
 
+void save_2d_array_to_file(const int (*array)[3], size_t row_count, const char *filename) {
+    FILE *file = fopen(filename, "w");
+    if (file == NULL) {
+        printf("Error opening file: %s\n", filename);
+        return;
+    }
+    fprintf(file, "#include <stdio.h>\n\n");
+    fprintf(file, "int split_data[][3] = {\n");
+    for (size_t i = 0; i < row_count; i++) {
+        fprintf(file, "    {");
+        for (size_t j = 0; j < 3; j++) {
+            if (j != 0) {
+                fprintf(file, ", ");
+            }
+            fprintf(file, "%d", array[i][j]);
+        }
+        fprintf(file, "}%s\n", i + 1 < row_count ? "," : "");
+    }
+    fprintf(file, "};\n");
+    fprintf(file, "size_t row_count = %zu;\n", row_count);
+
+    fclose(file);
+    printf("2D array saved to file: %s\n", filename);
+}
+
+
+void create_groups(int split_data[][3], int n, Group *groups, int *group_count, int max_memory) {
+    int current_group_id = 0;
+    int i = 0;
+    while (i < n) {
+        int remaining_memory = max_memory;
+        groups[current_group_id].group_id = current_group_id;
+        groups[current_group_id].group_memory = 0;
+
+        int num_layers = 0;
+        while (i < n && remaining_memory >= split_data[i][1]) {
+            int layer_id = split_data[i][0];
+            int split_memory = split_data[i][1];
+            int split_num = split_data[i][2];
+            int layer_count =  0;
+            
+            if ( split_data[i][1] != 0 ) layer_count = remaining_memory / split_memory;
+            else layer_count = remaining_memory / 1;
+
+            if (layer_count > split_num) {
+                layer_count = split_num;
+            }
+
+            groups[current_group_id].split_layer_ids[num_layers] = layer_id;
+            groups[current_group_id].split_layer_nums[num_layers] = layer_count;
+            num_layers++;
+
+            remaining_memory -= layer_count * split_memory;
+            split_data[i][2] -= layer_count;
+
+            if (split_data[i][2] == 0) {
+                i++;
+            }
+        }
+
+        groups[current_group_id].group_memory = max_memory - remaining_memory;
+        current_group_id++;
+    }
+    *group_count = current_group_id;
+}
+
+void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const char *filename) {
+    FILE *file = fopen(filename, "w");
+    if (file == NULL) {
+        printf("Error opening file: %s\n", filename);
+        return;
+    }
+    fprintf(file, "#define MAX_memory %d\n", maximum_mem);
+    fprintf(file, "#define number_G %d\n", group_count);
+    fprintf(file, "#define number_L %d\n", number_L);
+    fprintf(file, "\n");
+    fprintf(file, "typedef struct {\n");
+    fprintf(file, "    int group_id;\n");
+    fprintf(file, "    int group_memory;\n");
+    fprintf(file, "    int split_layer_ids[number_L];\n");
+    fprintf(file, "    int split_layer_nums[number_L];\n");
+    fprintf(file, "} Group;\n");
+    fprintf(file, "\n");
+    fprintf(file, "Group groups[number_G] = {\n");
+
+    for (int i = 0; i < group_count; i++) {
+        fprintf(file, "    {%d, %d,\n", groups[i].group_id, groups[i].group_memory);
+        fprintf(file, "    {");
+        for (int j = 0; j < number_L; j++) {
+            if (j != 0) {
+                fprintf(file, ", ");
+            }
+            fprintf(file, "%d", groups[i].split_layer_ids[j]);
+        }
+        fprintf(file, "},\n");
+        fprintf(file, "    {");
+        for (int j = 0; j < number_L; j++) {
+            if (j != 0) {
+                fprintf(file, ", ");
+            }
+            fprintf(file, "%d", groups[i].split_layer_nums[j]);
+        }
+        fprintf(file, "}}%s\n", i + 1 < group_count ? "," : "");
+    }
+    fprintf(file, "};\n");
+    fprintf(file, "int group_count = %d;\n", group_count);
+
+    fclose(file);
+    printf("Group struct array saved to file: %s\n", filename);
+}
+
 void fuse_conv_batchnorm(network net)
 {
     int j;
 
 /** Make after_batch model files**/
     int sum_batch=0;
-    FILE *fp = fopen("./after_batch_model.weights","ab");
+    int sum_of_batch[500] = {0};
+    FILE *fp = fopen("./after_split_alexnet.weights","ab");
+    int split_size = 4;
+    split_status[8] = split_size;
 /** Make after_batch model files**/
 
+
     for (j = 0; j < net.n; ++j) {
+
         layer *l = &net.layers[j];
+        split_num = split_status[j];
 
         if (l->type == CONVOLUTIONAL  || l->type == CONNECTED ) {
             //printf(" Merges Convolutional-%d and batch_norm \n", j);
             if (l->type == CONVOLUTIONAL){
-                printf("CONV %d ", j);
+                // printf("CONV %d ", j);
             }
             else if ( l->type == CONNECTED ){
-                printf("FC %d ", j);
+                // printf("FC %d ", j);
             }
             if (l->share_layer != NULL) {
                 l->batch_normalize = 0;
             }
 
             if (l->batch_normalize) {
-                printf("--> BN\n");
+                // printf("--> BN\n");
                 int f;
                 for (f = 0; f < l->n; ++f)
                 {
@@ -1320,13 +1439,31 @@ void fuse_conv_batchnorm(network net)
                 }
 
 /** Make after_batch model files**/
-                fwrite(l->biases,sizeof(float),l->n,fp);
-                fwrite(l->weights,sizeof(float),l->nweights,fp);
-                printf("l->n : %d, l->nweights : %d \n",l->n, l->nweights);
-                printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
-                sum_batch += l->n + l->nweights;
-                printf("layer param size: %d (%d)\n",(l->n+l->nweights)*4,sum_batch*4);
-                printf("-------------------------------------------------------------\n");
+                if (split_num){
+                    // Calculate half of the biases and weights
+                    int half_biases = l->n / split_num;
+                    int half_weights = l->nweights / split_num;// Write the first half of biases and weights
+
+                    for (int i=0; i<split_num; ++i){
+                        fwrite(l->biases + (half_biases*i), sizeof(float), half_biases, fp);
+                        fwrite(l->weights + (half_weights*i), sizeof(float), half_weights, fp);
+                        sum_batch += half_biases + half_weights;                
+                        // printf("%d - split (%d) batch_layer l.biases %lf l.weights %lf \n",j,i,l->biases[half_biases*i],l->weights[half_weights*i]);
+                        // printf("%d - split (%d) layer param size: %d (%d)\n",j,i,(half_biases + half_weights)*4,sum_batch*4);
+                        // printf("\n -- %d, biases[00], weights[00]: %0.3f, %0.3f\n", j, l->biases[0+half_biases*i], l->weights[0+half_weights*i]);
+                        // printf("\n -- %d, biases[01], weights[01]: %0.3f, %0.3f\n", j, l->biases[1+half_biases*i], l->weights[1+half_weights*i]);
+                        // printf("\n -- %d, biases[02], weights[02]: %0.3f, %0.3f\n", j, l->biases[2+half_biases*i], l->weights[2+half_weights*i]);
+                        // printf("\n -- %d, biases[03], weights[03]: %0.3f, %0.3f\n", j, l->biases[3+half_biases*i], l->weights[3+half_weights*i]);
+                    }
+                }
+                else{
+                    fwrite(l->biases,sizeof(float),l->n,fp);
+                    fwrite(l->weights,sizeof(float),l->nweights,fp);
+                    sum_batch += l->n + l->nweights;
+                    
+                    // printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+                    // printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+                }
 /** Make after_batch model files**/
 
                 free_convolutional_batchnorm(l);
@@ -1340,14 +1477,30 @@ void fuse_conv_batchnorm(network net)
 
 /** Make after_batch model files**/
             else if (!l->batch_normalize){
-                printf("--> !BN\n");
-                fwrite(l->biases,sizeof(float),l->n,fp);
-                fwrite(l->weights,sizeof(float),l->nweights,fp);
-                printf("l->n : %d, l->nweights : %d \n",l->n, l->nweights);
-                printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
-                sum_batch += l->n + l->nweights;
-                printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
-                printf("-------------------------------------------------------------\n");
+                if (split_num){
+                    // Calculate half of the biases and weights
+                    int half_biases = l->n / split_num;
+                    int half_weights = l->nweights / split_num;// Write the first half of biases and weights
+
+                    for (int i=0; i<split_num; ++i){
+                        fwrite(l->biases + (half_biases*i), sizeof(float), half_biases, fp);
+                        fwrite(l->weights + (half_weights*i), sizeof(float), half_weights, fp);
+                        sum_batch += half_biases + half_weights;                
+                        // printf("%d - split (2) batch_layer l.biases %lf l.weights %lf \n",j,l->biases[half_biases],l->weights[half_weights]);
+                        // printf("%d - split (2) layer param size: %d (%d)\n",half_biases,((l->n-half_biases)+(l->nweights-half_weights))*4,sum_batch*4);
+                        // printf("\n -- %d, biases[00], weights[00]: %0.3f, %0.3f\n", j, l->biases[0+half_biases*i], l->weights[0+half_weights*i]);
+                        // printf("\n -- %d, biases[01], weights[01]: %0.3f, %0.3f\n", j, l->biases[1+half_biases*i], l->weights[1+half_weights*i]);
+                        // printf("\n -- %d, biases[02], weights[02]: %0.3f, %0.3f\n", j, l->biases[2+half_biases*i], l->weights[2+half_weights*i]);
+                        // printf("\n -- %d, biases[03], weights[03]: %0.3f, %0.3f\n", j, l->biases[3+half_biases*i], l->weights[3+half_weights*i]);
+                    }
+                }
+                else{
+		        fwrite(l->biases,sizeof(float),l->n,fp);
+		        fwrite(l->weights,sizeof(float),l->nweights,fp);
+		        sum_batch += l->n + l->nweights;		        
+                // printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
+		        // printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
+                }
             }
 /** Make after_batch model files**/
 
@@ -1357,8 +1510,8 @@ void fuse_conv_batchnorm(network net)
             if (l->nweights > 0) {
                 //cuda_pull_array(l.weights_gpu, l.weights, l.nweights);
                 int i;
-                for (i = 0; i < l->nweights; ++i) printf(" w = %f,", l->weights[i]);
-                printf(" l->nweights = %d, j = %d \n", l->nweights, j);
+                // for (i = 0; i < l->nweights; ++i) printf(" w = %f,", l->weights[i]);
+                // printf(" l->nweights = %d, j = %d \n", l->nweights, j);
             }
 
             // nweights - l.n or l.n*l.c or (l.n*l.c*l.h*l.w)
@@ -1412,6 +1565,68 @@ void fuse_conv_batchnorm(network net)
 /** Make after_batch model files**/
     fclose(fp);
 /** Make after_batch model files**/
+
+    // Printing the input data
+    printf("\nlayer_id, memory, filter_size\n");
+    int input_data[206][3] ;
+
+    for (int i = 0; i < net.n; ++i) {
+        layer *l = &net.layers[i];
+        input_data[i][0] = i+1 ;
+        if ((l->nweights+l->n) > 1){
+            input_data[i][1] = (l->nweights+l->n) *sizeof(float) ;
+            input_data[i][2] = (l->n) ;
+        }
+        else{
+            input_data[i][1] = 0 ;
+            input_data[i][2] = 0 ;
+        }
+        printf("%d, %d, %d\n", input_data[i][0],input_data[i][1],input_data[i][2] );
+   }
+
+    // Printing the split_data
+    printf("\nlayer_id , split_memory , split_num\n");
+    int num_layers = sizeof(input_data) / sizeof(input_data[0]);
+    int split_data[num_layers][3];
+
+    for (int i = 0; i < num_layers; i++) {
+        split_data[i][0] = input_data[i][0]; // layer_id
+        if (input_data[i][2] != 0) {
+            split_data[i][1] = input_data[i][1] / input_data[i][2]; // split_memory
+            split_data[i][2] = input_data[i][2]; // split_num
+        } else {
+            split_data[i][1] = 0;
+            split_data[i][2] = 1;
+        }
+        printf("%d , %d , %d\n", split_data[i][0], split_data[i][1], split_data[i][2]);
+    }
+
+    size_t split_row_count = sizeof(split_data) / sizeof(split_data[0]);
+
+    save_2d_array_to_file(split_data, split_row_count, "./saved_split_info.c");
+
+    // Printing the merge_data
+    int n = sizeof(split_data) / sizeof(split_data[0]);
+
+    Group groups[number_G] = {0,};
+
+    int group_count = 0;
+
+    create_groups(split_data, n, groups, &group_count, MAX_memory);
+
+    // Save groups to file
+    save_groups_to_file(MAX_memory, groups, group_count, "saved_groups.c");
+    
+    for (int i = 0; i < group_count; i++) {
+        printf("Group %d, memory %d:\n", groups[i].group_id, groups[i].group_memory);
+        for (int j = 0; j < number_G && groups[i].split_layer_ids[j] != 0; j++) {
+            printf("Layer ID: %d, count: %d\n",
+                   groups[i].split_layer_ids[j],
+                   groups[i].split_layer_nums[j]);
+        }
+        printf("\n");
+    }
+
 
 }
 
