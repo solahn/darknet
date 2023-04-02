@@ -1437,121 +1437,74 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
 
 void make_after_split_model(network net, int maximum_mem, Group *groups, int group_count, const char *filename)
 {
-    int j;
-
     int sum_batch=0;
-    FILE *fp = fopen("./after_batch_model.weights","ab");
 
-    for (j = 0; j < net.n; ++j) {
-        layer *l = &net.layers[j];
+    int current_layer_id = 0;
+    int overlapping_layer_id = 0;
+    int overlapping_layer_w = 0; // weigths
+    int overlapping_layer_b = 0; // biases
 
-        if (l->type == CONVOLUTIONAL  || l->type == CONNECTED ) {
-            if (l->type == CONVOLUTIONAL){
-                printf("CONV %d ", j);
+    FILE *fp = fopen(filename,"ab");
+
+    printf("group count: %d\n", group_count);
+    for (int i = 0; i < group_count; ++i) { 
+        int number_of_members = groups[i].group_members;
+
+        layer *layer_set[number_of_members];
+        for (int j = 0; j < number_of_members; j++){
+            int current_layer_id = groups[i].split_layer_ids[j] - 1;
+            //printf("%d <---- %d\n", i, current_layer_id);
+            layer_set[j] = &net.layers[current_layer_id];
+        }
+
+
+        for (int j = 0; j < number_of_members; j++){
+            layer *l = layer_set[j];
+            current_layer_id = groups[i].split_layer_ids[j] - 1;
+            printf("%d <---- %d\n", i, current_layer_id);
+
+            if (l->type == CONVOLUTIONAL  || l->type == CONNECTED ) {
+                if (l->type == CONVOLUTIONAL){
+                    printf("CONV %d ", current_layer_id);
+                }
+                else if ( l->type == CONNECTED ){
+                    printf("FC %d ", current_layer_id);
+                }
+
+                if ( j == 0 && current_layer_id == overlapping_layer_id ){
+                    printf("Overlapping %d == %d \n", overlapping_layer_id, current_layer_id);
+                    fwrite(l->biases+overlapping_layer_b,sizeof(float),groups[i].split_layer_b[j],fp);
+                    fwrite(l->weights+overlapping_layer_w,sizeof(float),groups[i].split_layer_w[j],fp);
+                    // fwrite(l->biases+ (overlapping_layer_b*sizeof(float)),sizeof(float),groups[i].split_layer_b[j],fp);
+                    // fwrite(l->weights+ (overlapping_layer_w*sizeof(float)),sizeof(float),groups[i].split_layer_w[j],fp);
+                    printf("l.biases %lf l.weights %lf \n",l->biases[overlapping_layer_b],l->weights[overlapping_layer_w]);
+                }
+                else {
+                    fwrite(l->biases,sizeof(float),groups[i].split_layer_b[j],fp);
+                    fwrite(l->weights,sizeof(float),groups[i].split_layer_w[j],fp);
+                    printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
+                }
+
+                sum_batch += groups[i].split_layer_b[j] + groups[i].split_layer_w[j];
+                printf("l->n : %d, l->nweights : %d \n",groups[i].split_layer_b[j], groups[i].split_layer_w[j]);
+                printf("layer param size: %d (%d)\n",(groups[i].split_layer_b[j]+groups[i].split_layer_w[j])*sizeof(float),sum_batch*sizeof(float));
+                printf("-------------------------------------------------------------\n");
+
             }
-            else if ( l->type == CONNECTED ){
-                printf("FC %d ", j);
-            }
 
-            fwrite(l->biases,sizeof(float),l->n,fp);
-            fwrite(l->weights,sizeof(float),l->nweights,fp);
-            printf("l->n : %d, l->nweights : %d \n",l->n, l->nweights);
-            printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
-            sum_batch += l->n + l->nweights;
-            printf("layer param size: %d (%d)\n",(l->n+l->nweights)*4,sum_batch*4);
-            printf("-------------------------------------------------------------\n");
+            if ( j == number_of_members - 1 ) { // last layer
+                overlapping_layer_id = current_layer_id;
+                printf("overlapping_layer_id : %d \n", overlapping_layer_id);
+                overlapping_layer_w = groups[i].split_layer_w[j];
+                overlapping_layer_b = groups[i].split_layer_b[j];
+            }
 
         }
-    }
 
+
+    }
     fclose(fp);
 }
-
-// void make_after_split_model(network net, int maximum_mem, Group *groups, int group_count, const char *filename)
-// {
-//     int sum_batch=0;
-//     FILE *fp = fopen(filename,"ab");
-//     int split_size = 4;
-//     split_status[191] = split_size;
-//     split_status[195] = split_size;
-//     split_status[199] = split_size;
-//     printf("group count: %d\n", group_count);
-//     for (int j = 0; j < group_count; ++j) {
-
-//         // printf("- layers: %d \n", sizeof(groups[j].split_layer_ids)/sizeof(groups[j].split_layer_ids[0])); // groups[i].group_members
-
-//         layer *l = &net.layers[j];
-//         split_num = split_status[j];
-
-//         if (l->type == CONVOLUTIONAL  || l->type == CONNECTED ) {
-//             //printf(" Merges Convolutional-%d and batch_norm \n", j);
-//             if (l->type == CONVOLUTIONAL){
-//                 // printf("CONV %d ", j);
-//             }
-//             else if ( l->type == CONNECTED ){
-//                 // printf("FC %d ", j);
-//             }
-//             if (l->batch_normalize) {
-//                 // printf("--> BN\n");
-
-//                 if (split_num){
-//                     // Calculate half of the biases and weights
-//                     int half_biases = l->n / split_num;
-//                     int half_weights = l->nweights / split_num;// Write the first half of biases and weights
-
-//                     for (int i=0; i<split_num; ++i){
-//                         fwrite(l->biases + (half_biases*i), sizeof(float), half_biases, fp);
-//                         fwrite(l->weights + (half_weights*i), sizeof(float), half_weights, fp);
-//                         sum_batch += half_biases + half_weights;                
-//                         // printf("%d - split (%d) batch_layer l.biases %lf l.weights %lf \n",j,i,l->biases[half_biases*i],l->weights[half_weights*i]);
-//                         // printf("%d - split (%d) layer param size: %d (%d)\n",j,i,(half_biases + half_weights)*4,sum_batch*4);
-//                         // printf("\n -- %d, biases[00], weights[00]: %0.3f, %0.3f\n", j, l->biases[0+half_biases*i], l->weights[0+half_weights*i]);
-//                         // printf("\n -- %d, biases[01], weights[01]: %0.3f, %0.3f\n", j, l->biases[1+half_biases*i], l->weights[1+half_weights*i]);
-//                         // printf("\n -- %d, biases[02], weights[02]: %0.3f, %0.3f\n", j, l->biases[2+half_biases*i], l->weights[2+half_weights*i]);
-//                         // printf("\n -- %d, biases[03], weights[03]: %0.3f, %0.3f\n", j, l->biases[3+half_biases*i], l->weights[3+half_weights*i]);
-//                     }
-//                 }
-//                 else{
-//                     fwrite(l->biases,sizeof(float),l->n,fp);
-//                     fwrite(l->weights,sizeof(float),l->nweights,fp);
-//                     sum_batch += l->n + l->nweights;
-                    
-//                     // printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
-//                     // printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
-//                 }
-//             }
-
-//             else if (!l->batch_normalize){
-//                 if (split_num){
-//                     // Calculate half of the biases and weights
-//                     int half_biases = l->n / split_num;
-//                     int half_weights = l->nweights / split_num;// Write the first half of biases and weights
-
-//                     for (int i=0; i<split_num; ++i){
-//                         fwrite(l->biases + (half_biases*i), sizeof(float), half_biases, fp);
-//                         fwrite(l->weights + (half_weights*i), sizeof(float), half_weights, fp);
-//                         sum_batch += half_biases + half_weights;                
-//                         // printf("%d - split (2) batch_layer l.biases %lf l.weights %lf \n",j,l->biases[half_biases],l->weights[half_weights]);
-//                         // printf("%d - split (2) layer param size: %d (%d)\n",half_biases,((l->n-half_biases)+(l->nweights-half_weights))*4,sum_batch*4);
-//                         // printf("\n -- %d, biases[00], weights[00]: %0.3f, %0.3f\n", j, l->biases[0+half_biases*i], l->weights[0+half_weights*i]);
-//                         // printf("\n -- %d, biases[01], weights[01]: %0.3f, %0.3f\n", j, l->biases[1+half_biases*i], l->weights[1+half_weights*i]);
-//                         // printf("\n -- %d, biases[02], weights[02]: %0.3f, %0.3f\n", j, l->biases[2+half_biases*i], l->weights[2+half_weights*i]);
-//                         // printf("\n -- %d, biases[03], weights[03]: %0.3f, %0.3f\n", j, l->biases[3+half_biases*i], l->weights[3+half_weights*i]);
-//                     }
-//                 }
-//                 else{
-// 		        fwrite(l->biases,sizeof(float),l->n,fp);
-// 		        fwrite(l->weights,sizeof(float),l->nweights,fp);
-// 		        sum_batch += l->n + l->nweights;		        
-//                 // printf("%d batch_layer l.biases %lf l.weights %lf \n",j,l->biases[0],l->weights[0]);
-// 		        // printf("%d layer param size: %d (%d)\n",j,(l->n+l->nweights)*4,sum_batch*4);
-//                 }
-//             }
-//         }
-//     }
-
-//     fclose(fp);
-// }
 
 void fuse_conv_batchnorm(network net)
 {
