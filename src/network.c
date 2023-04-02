@@ -1279,17 +1279,17 @@ static float lrelu(float src) {
     return eps;
 }
 
-void save_2d_array_to_file(const int (*array)[3], size_t row_count, const char *filename) {
+void save_2d_array_to_file(const int (*array)[5], size_t row_count, const char *filename) {
     FILE *file = fopen(filename, "w");
     if (file == NULL) {
         printf("Error opening file: %s\n", filename);
         return;
     }
     fprintf(file, "#include <stdio.h>\n\n");
-    fprintf(file, "int split_data[][3] = {\n");
+    fprintf(file, "int split_data[][5] = {\n");
     for (size_t i = 0; i < row_count; i++) {
         fprintf(file, "    {");
-        for (size_t j = 0; j < 3; j++) {
+        for (size_t j = 0; j < 5; j++) {
             if (j != 0) {
                 fprintf(file, ", ");
             }
@@ -1304,8 +1304,7 @@ void save_2d_array_to_file(const int (*array)[3], size_t row_count, const char *
     printf("2D array saved to file: %s\n", filename);
 }
 
-
-void create_groups(int split_data[][3], int n, Group *groups, int *group_count, int max_memory) {
+void create_groups(int split_data[][5], int n, Group *groups, int *group_count, int max_memory) {
     int current_group_id = 0;
     int i = 0;
     while (i < n) {
@@ -1318,6 +1317,8 @@ void create_groups(int split_data[][3], int n, Group *groups, int *group_count, 
             int layer_id = split_data[i][0];
             int split_memory = split_data[i][1];
             int split_num = split_data[i][2];
+            int split_w = split_data[i][3];
+            int split_b = split_data[i][4];
             int layer_count =  0;
 
             if ( split_data[i][1] != 0 ) layer_count = remaining_memory / split_memory;
@@ -1329,6 +1330,9 @@ void create_groups(int split_data[][3], int n, Group *groups, int *group_count, 
 
             groups[current_group_id].split_layer_ids[num_layers] = layer_id;
             groups[current_group_id].split_layer_nums[num_layers] = layer_count;
+            groups[current_group_id].split_layer_memory[num_layers] = layer_count*split_memory;
+            groups[current_group_id].split_layer_w[num_layers] = layer_count*split_w;
+            groups[current_group_id].split_layer_b[num_layers] = layer_count*split_b;
             num_layers++;
 
             remaining_memory -= layer_count * split_memory;
@@ -1374,6 +1378,9 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
     fprintf(file, "    int group_memory;\n");
     fprintf(file, "    int split_layer_ids[number_L];\n");
     fprintf(file, "    int split_layer_nums[number_L];\n");
+    fprintf(file, "    int split_layer_memory[number_L];\n");
+    fprintf(file, "    int split_layer_w[number_L];\n");
+    fprintf(file, "    int split_layer_b[number_L];\n");
     fprintf(file, "} Group;\n");
     fprintf(file, "\n");
     fprintf(file, "Group groups[number_G] = {\n");
@@ -1394,6 +1401,30 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
                 fprintf(file, ", ");
             }
             fprintf(file, "%d", groups[i].split_layer_nums[j]);
+        }
+        fprintf(file, "},\n");
+        fprintf(file, "    {");
+        for (int j = 0; j < number_L; j++) {
+            if (j != 0) {
+                fprintf(file, ", ");
+            }
+            fprintf(file, "%d", groups[i].split_layer_memory[j]);
+        }
+        fprintf(file, "},\n");
+        fprintf(file, "    {");
+        for (int j = 0; j < number_L; j++) {
+            if (j != 0) {
+                fprintf(file, ", ");
+            }
+            fprintf(file, "%d", groups[i].split_layer_w[j]);
+        }
+        fprintf(file, "},\n");
+        fprintf(file, "    {");
+        for (int j = 0; j < number_L; j++) {
+            if (j != 0) {
+                fprintf(file, ", ");
+            }
+            fprintf(file, "%d", groups[i].split_layer_b[j]);
         }
         fprintf(file, "}}%s\n", i + 1 < group_count ? "," : "");
     }
@@ -1598,7 +1629,7 @@ void fuse_conv_batchnorm(network net)
 
     // Printing the input data
     printf("\nlayer_id, memory, filter_size\n");
-    int input_data[206][3] ;
+    int input_data[206][5] ;
 
     for (int i = 0; i < net.n; ++i) {
         layer *l = &net.layers[i];
@@ -1606,29 +1637,37 @@ void fuse_conv_batchnorm(network net)
         if ((l->nweights+l->n) > 1){
             input_data[i][1] = (l->nweights+l->n) *sizeof(float) ;
             input_data[i][2] = (l->n) ;
+            input_data[i][3] = (l->nweights) ;
+            input_data[i][4] = (l->n) ;
         }
         else{
             input_data[i][1] = 0 ;
             input_data[i][2] = 0 ;
+            input_data[i][3] = 0 ;
+            input_data[i][4] = 0 ;
         }
-        printf("%d, %d, %d\n", input_data[i][0],input_data[i][1],input_data[i][2] );
+        printf("%d, %d, %d, %d, %d\n", input_data[i][0],input_data[i][1],input_data[i][2],input_data[i][3],input_data[i][4] );
    }
 
     // Printing the split_data
     printf("\nlayer_id , split_memory , split_num\n");
     int num_layers = sizeof(input_data) / sizeof(input_data[0]);
-    int split_data[num_layers][3];
+    int split_data[num_layers][5];
 
     for (int i = 0; i < num_layers; i++) {
         split_data[i][0] = input_data[i][0]; // layer_id
         if (input_data[i][2] != 0) {
             split_data[i][1] = input_data[i][1] / input_data[i][2]; // split_memory
             split_data[i][2] = input_data[i][2]; // split_num
+            split_data[i][3] = input_data[i][3] / input_data[i][2]; ; // split_w
+            split_data[i][4] = input_data[i][4] / input_data[i][2]; ; // split_b
         } else {
             split_data[i][1] = 0;
             split_data[i][2] = 1;
+            split_data[i][3] = 0; // split_w
+            split_data[i][4] = 0; // split_b
         }
-        printf("%d , %d , %d\n", split_data[i][0], split_data[i][1], split_data[i][2]);
+        printf("%d, %d, %d, %d, %d\n", split_data[i][0],split_data[i][1],split_data[i][2],split_data[i][3],split_data[i][4] );
     }
 
     size_t split_row_count = sizeof(split_data) / sizeof(split_data[0]);
@@ -1647,9 +1686,12 @@ void fuse_conv_batchnorm(network net)
     for (int i = 0; i < group_count; i++) {
         printf("Group %d, members: %d, memory %d:\n", groups[i].group_id, groups[i].group_members, groups[i].group_memory);
         for (int j = 0; j < number_G && groups[i].split_layer_ids[j] != 0; j++) {
-            printf("Layer ID: %d, count: %d\n",
+            printf("Layer ID: %d, count: %d, memory: %d, w: %d, b: %d\n",
                    groups[i].split_layer_ids[j],
-                   groups[i].split_layer_nums[j]);
+                   groups[i].split_layer_nums[j],
+                   groups[i].split_layer_memory[j],
+                   groups[i].split_layer_w[j],
+                   groups[i].split_layer_b[j]);
         }
         printf("\n");
     }

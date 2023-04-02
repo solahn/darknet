@@ -8,6 +8,9 @@ typedef struct {
     int group_memory;
     int split_layer_ids[number_L];
     int split_layer_nums[number_L];
+    int split_layer_memory[number_L];
+    int split_layer_w[number_L];
+    int split_layer_b[number_L];
 } Group;
 
 
