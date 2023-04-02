@@ -1435,8 +1435,41 @@ void save_groups_to_file(int maximum_mem, Group *groups, int group_count, const 
     printf("Group struct array saved to file: %s\n", filename);
 }
 
+void save_array_to_csv(float *array, int size, const char *filename) {
+    FILE *file = fopen(filename, "w");
+    if (file == NULL) {
+        printf("Error opening file!\n");
+        return;
+    }
+
+    for (int i = 0; i < size; i++) {
+        fprintf(file, "%.6f", array[i]);
+        if (i < size - 1) {
+            fprintf(file, ",");
+        }
+    }
+    fclose(file);
+}
+
+void save_layers_to_csv(network net) {
+    for (int i = 54; i < 60; i++) {
+        char biases_filename[64];
+        char weights_filename[64];
+        layer *l = &net.layers[i];
+        snprintf(biases_filename, sizeof(biases_filename), "./test/biases_layer_%d.csv", i);
+        snprintf(weights_filename, sizeof(weights_filename), "./test/weights_layer_%d.csv", i);
+
+        save_array_to_csv(l->biases, l->n, biases_filename);
+        save_array_to_csv(l->weights, l->nweights, weights_filename);
+    }
+}
+
+
 void make_after_split_model(network net, int maximum_mem, Group *groups, int group_count, const char *filename)
 {
+
+    //save_layers_to_csv(net);
+
     int sum_batch=0;
 
     int current_layer_id = 0;
@@ -1477,18 +1510,18 @@ void make_after_split_model(network net, int maximum_mem, Group *groups, int gro
                     fwrite(l->weights+overlapping_layer_w,sizeof(float),groups[i].split_layer_w[j],fp);
                     // fwrite(l->biases+ (overlapping_layer_b*sizeof(float)),sizeof(float),groups[i].split_layer_b[j],fp);
                     // fwrite(l->weights+ (overlapping_layer_w*sizeof(float)),sizeof(float),groups[i].split_layer_w[j],fp);
-                    printf("l.biases %lf l.weights %lf \n",l->biases[overlapping_layer_b],l->weights[overlapping_layer_w]);
+                    printf("l.biases %0.3lf l.weights %0.3lf \n",l->biases[overlapping_layer_b],l->weights[overlapping_layer_w]);
                 }
                 else {
                     fwrite(l->biases,sizeof(float),groups[i].split_layer_b[j],fp);
                     fwrite(l->weights,sizeof(float),groups[i].split_layer_w[j],fp);
-                    printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
+                    printf("l.biases %0.3lf l.weights %0.3lf \n",l->biases[0],l->weights[0]);
                 }
 
                 sum_batch += groups[i].split_layer_b[j] + groups[i].split_layer_w[j];
-                printf("l->n : %d, l->nweights : %d \n",groups[i].split_layer_b[j], groups[i].split_layer_w[j]);
-                printf("layer param size: %d (%d)\n",(groups[i].split_layer_b[j]+groups[i].split_layer_w[j])*sizeof(float),sum_batch*sizeof(float));
-                printf("-------------------------------------------------------------\n");
+                // printf("l->n : %d, l->nweights : %d \n",groups[i].split_layer_b[j], groups[i].split_layer_w[j]);
+                // printf("layer param size: %d (%d)\n",(groups[i].split_layer_b[j]+groups[i].split_layer_w[j])*sizeof(float),sum_batch*sizeof(float));
+                // printf("-------------------------------------------------------------\n");
 
             }
 
