@@ -1,6 +1,7 @@
 #include "darknet.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <assert.h>
 
@@ -1279,6 +1280,22 @@ static float lrelu(float src) {
     return eps;
 }
 
+int* index_function(int* arr, int size, int target, int* count) {
+    int i;
+    int* positions = NULL;
+    *count = 0;
+
+    for (i = 0; i < size; i++) {
+        if (arr[i] == target) {
+            (*count)++;
+            positions = realloc(positions, (*count) * sizeof(int));
+            positions[(*count) - 1] = i;
+        }
+    }
+
+    return positions;
+}
+
 void save_2d_array_to_file(const int (*array)[5], size_t row_count, const char *filename) {
     FILE *file = fopen(filename, "w");
     if (file == NULL) {
@@ -1497,6 +1514,7 @@ void make_after_split_model(network net, int maximum_mem, Group *groups, int gro
             printf("%d <---- %d\n", i, current_layer_id);
 
             if (l->type == CONVOLUTIONAL  || l->type == CONNECTED ) {
+
                 if (l->type == CONVOLUTIONAL){
                     printf("CONV %d ", current_layer_id);
                 }
@@ -1506,16 +1524,18 @@ void make_after_split_model(network net, int maximum_mem, Group *groups, int gro
 
                 if ( j == 0 && current_layer_id == overlapping_layer_id ){
                     printf("Overlapping %d == %d \n", overlapping_layer_id, current_layer_id);
+                    printf("b size: %d ~ %d, w size: %d ~ %d \n", overlapping_layer_b, overlapping_layer_b+groups[i].split_layer_b[j], overlapping_layer_w, overlapping_layer_w+groups[i].split_layer_w[j]);
                     fwrite(l->biases+overlapping_layer_b,sizeof(float),groups[i].split_layer_b[j],fp);
                     fwrite(l->weights+overlapping_layer_w,sizeof(float),groups[i].split_layer_w[j],fp);
                     // fwrite(l->biases+ (overlapping_layer_b*sizeof(float)),sizeof(float),groups[i].split_layer_b[j],fp);
                     // fwrite(l->weights+ (overlapping_layer_w*sizeof(float)),sizeof(float),groups[i].split_layer_w[j],fp);
-                    printf("l.biases %0.3lf l.weights %0.3lf \n",l->biases[overlapping_layer_b],l->weights[overlapping_layer_w]);
+                    printf("l.biases %lf l.weights %lf \n",l->biases[overlapping_layer_b],l->weights[overlapping_layer_w]);
                 }
                 else {
+                    printf("b size: %d ~ %d, w size: %d ~ %d \n", 0, groups[i].split_layer_b[j], 0, groups[i].split_layer_w[j]);
                     fwrite(l->biases,sizeof(float),groups[i].split_layer_b[j],fp);
                     fwrite(l->weights,sizeof(float),groups[i].split_layer_w[j],fp);
-                    printf("l.biases %0.3lf l.weights %0.3lf \n",l->biases[0],l->weights[0]);
+                    printf("l.biases %lf l.weights %lf \n",l->biases[0],l->weights[0]);
                 }
 
                 sum_batch += groups[i].split_layer_b[j] + groups[i].split_layer_w[j];
@@ -1705,7 +1725,7 @@ void fuse_conv_batchnorm(network net)
         printf("Group %d, members: %d, memory %d:\n", groups[i].group_id, groups[i].group_members, groups[i].group_memory);
         for (int j = 0; j < number_G && groups[i].split_layer_ids[j] != 0; j++) {
             printf("Layer ID: %d, count: %d, memory: %d, w: %d, b: %d\n",
-                   groups[i].split_layer_ids[j],
+                   groups[i].split_layer_ids[j]-1,
                    groups[i].split_layer_nums[j],
                    groups[i].split_layer_memory[j],
                    groups[i].split_layer_w[j],
